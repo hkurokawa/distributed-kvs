@@ -3,6 +3,7 @@
 require 'sinatra'
 require 'net/http'
 require 'uri'
+require 'json'
 
 STORAGE = {}
 HOST = 'localhost'
@@ -18,10 +19,32 @@ get '/:key' do
 end
 
 # Internal API
-post '/replicate/:key' do
-  (key, value) = [params['key'], request.body.read]
+get '/internal/:key' do
+  key = params['key']
+  file = "data-#{request.port}.json"
+  data = if File.exists?(file)
+           File.open(file) { |f| JSON.load(f) }
+         else
+           { 'version': 1, 'kvs': {}, }
+         end
+  if data['kvs'][key]
+    data['kvs'][key]
+  else
+    status 404
+  end
+end
 
-  STORAGE[key] = value
+post '/internal/:key' do
+  (key, value) = [params['key'], request.body.read]
+  file = "data-#{request.port}.json"
+  data = if File.exists?(file)
+           File.open(file) { |f| JSON.load(f) }
+         else
+           { 'version': 1, 'kvs': {}, }
+         end
+  data['kvs'][key] = value
+  File.open(file, mode = 'w') { |f| JSON.dump(data, f) }
+  true
 end
 
 post '/:key' do
