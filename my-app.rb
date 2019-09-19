@@ -72,7 +72,10 @@ get '/:key' do
   port = request.port
   key = params['key']
 
-  status 500 unless sync(port)
+  unless sync(port)
+    status 500
+    return
+  end
 
   data = read_local(port)
   return data[:kvs][key.to_sym]
@@ -82,12 +85,14 @@ post '/:key' do
   (key, value) = [params['key'], request.body.read]
 
   port = request.port
-  status 500 unless sync(port)
+  unless sync(port)
+    status 500
+    return
+  end
 
   data = read_local(port)
   data[:version] += 1
   data[:kvs][key.to_sym] = value
-  write_local(port, data)
 
   error_count = 0
 
@@ -108,6 +113,7 @@ post '/:key' do
   if error_count > 1
     status 500
   else
+    write_local(port, data)
     true
   end
 end
