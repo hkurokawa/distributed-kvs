@@ -1,4 +1,4 @@
-.PHONY: status start stop start-1 stop-1 restart
+.PHONY: status start stop start-1 stop-1 restart clean
 
 status:
 	pgrep -f my-app.rb
@@ -19,3 +19,7 @@ stop-1:
 	pkill -9 -f 'my-app.rb -p 3000'
 
 restart: stop start
+
+clean:
+	rm -f data-*.json
+	rm -f log.txt
