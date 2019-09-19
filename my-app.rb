@@ -5,73 +5,108 @@ require 'net/http'
 require 'uri'
 require 'json'
 
-STORAGE = {}
 HOST = 'localhost'
 PORTS = [3000, 3001, 3002]
 
-get '/:key' do
-  value = STORAGE[params['key']]
-  if value
-    value
-  else
-    status 404
-  end
-end
-
 # Internal API
-get '/internal/:key' do
-  key = params['key']
-  file = "data-#{request.port}.json"
-  data = if File.exists?(file)
-           File.open(file) { |f| JSON.load(f) }
-         else
-           { 'version': 0, 'kvs': {}, }
-         end
-  if data['kvs'][key]
-    data['kvs'][key]
+get '/internal' do
+  read_local(request.port).to_json
+end
+
+post '/internal' do
+  data = JSON.parse(request.body.read)
+  write_local(request.port, data)
+  true
+end
+
+def read_local(port)
+  file = "data-#{port}.json"
+  if File.exists?(file)
+    JSON.parse(File.read(file), symbolize_names: true)
   else
-    status 404
+    {version: 0, kvs: {}, }
   end
 end
 
-post '/internal/:key' do
-  (key, value) = [params['key'], request.body.read]
-  file = "data-#{request.port}.json"
-  data = if File.exists?(file)
-           File.open(file) { |f| JSON.load(f) }
-         else
-           { 'version': 0, 'kvs': {}, }
-         end
-  data['version'] += 1
-  data['kvs'][key] = value
+def write_local(port, data)
+  file = "data-#{port}.json"
   File.open(file, mode = 'w') { |f| JSON.dump(data, f) }
-  true
+end
+
+def sync(port)
+  local_data = read_local(port)
+  friend_hosts = PORTS.select { |p| p != port }
+  error_count = 0
+  friend_data = friend_hosts.map do |p|
+    begin
+      uri = URI.parse("http://#{HOST}:#{p}/internal")
+      http = Net::HTTP.new(uri.host, uri.port)
+      request = Net::HTTP::Get.new(uri.request_uri)
+      response = http.request(request)
+      if response.kind_of? Net::HTTPSuccess
+        JSON.parse(response.body, symbolize_names: true)
+      else
+        error_count += 1
+        nil
+      end
+    rescue => e
+      error_count += 1
+      nil
+    end
+  end
+
+  if error_count > 1
+    false
+  else
+    friend_data.each do |d|
+      if !d.nil? && d[:version] > local_data[:version]
+        local_data = d
+      end
+    end
+    write_local(port, local_data)
+    true
+  end
+end
+
+get '/:key' do
+  port = request.port
+  key = params['key']
+
+  status 500 unless sync(port)
+
+  data = read_local(port)
+  return data[:kvs][key.to_sym]
 end
 
 post '/:key' do
   (key, value) = [params['key'], request.body.read]
 
-  STORAGE[key] = value
+  port = request.port
+  status 500 unless sync(port)
 
-  friend_hosts = PORTS.select { |port| port != request.port }
+  data = read_local(port)
+  data[:version] += 1
+  data[:kvs][key.to_sym] = value
+  write_local(port, data)
+
   error_count = 0
 
-  friend_hosts.each do |port|
+  PORTS.select { |p| p != port }.each do |p|
     begin
-      uri = URI.parse("http://#{HOST}:#{port}/replicate/#{key}")
+      uri = URI.parse("http://#{HOST}:#{p}/internal")
       http = Net::HTTP.new(uri.host, uri.port)
       request = Net::HTTP::Post.new(uri.request_uri)
-      request.body = value
+      request.body = data.to_json
       response = http.request(request)
       error_count += 1 unless response.kind_of? Net::HTTPSuccess
     rescue => e
+      p e
       error_count += 1
     end
   end
 
-  case error_count
-  when 2
-    false
+  if error_count > 1
+    status 500
   else
     true
   end
