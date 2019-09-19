@@ -25,7 +25,7 @@ get '/internal/:key' do
   data = if File.exists?(file)
            File.open(file) { |f| JSON.load(f) }
          else
-           { 'version': 1, 'kvs': {}, }
+           { 'version': 0, 'kvs': {}, }
          end
   if data['kvs'][key]
     data['kvs'][key]
@@ -40,8 +40,9 @@ post '/internal/:key' do
   data = if File.exists?(file)
            File.open(file) { |f| JSON.load(f) }
          else
-           { 'version': 1, 'kvs': {}, }
+           { 'version': 0, 'kvs': {}, }
          end
+  data['version'] += 1
   data['kvs'][key] = value
   File.open(file, mode = 'w') { |f| JSON.dump(data, f) }
   true
